@@ -3,22 +3,27 @@ import pandas as pd
 import numpy as np
 import requests
 import joblib
+import os
 from rdkit import Chem
 from rdkit.Chem import Descriptors, rdMolDescriptors
 from sklearn.preprocessing import StandardScaler
 from sklearn.neighbors import NearestNeighbors
 
 # ==========================================
-# 1. CONFIGURATION & NAMES
+# 1. CONFIGURATION & BULLETPROOF PATHS
 # ==========================================
 st.set_page_config(page_title="CS-ALG SmartFormulator", layout="wide", page_icon="🧪")
 
-# File Paths 
-DATA_PATH = "Cleaned CS-ALG DATA.xlsx - default_1.csv" 
+# This dynamically finds the folder where app.py is located
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Define paths relative to the BASE_DIR
+DATA_PATH = os.path.join(BASE_DIR, "Cleaned CS-ALG DATA.xlsx - default_1.csv") 
+
 MODEL_PATHS = {
-    "Size": "models/rf_model_size_optimized.joblib",
-    "EE": "models/rf_model_EE%_optimized.joblib",
-    "Zeta": "models/rf_model_ZP_optimized.joblib"
+    "Size": os.path.join(BASE_DIR, "models", "rf_model_size_optimized.joblib"),
+    "EE": os.path.join(BASE_DIR, "models", "rf_model_EE%_optimized.joblib"),
+    "Zeta": os.path.join(BASE_DIR, "models", "rf_model_ZP_optimized.joblib")
 }
 
 # Features exactly as they appear in your dataset
@@ -40,6 +45,9 @@ MODEL_FEATURE_ORDER = FORMULATION_FEATURES + API_FEATURES
 @st.cache_data
 def load_data_and_bounds(filepath):
     """Loads data and finds min/max for the formulation parameters."""
+    if not os.path.exists(filepath):
+        st.error(f"Critical Error: Data file not found at {filepath}")
+        return None, None
     try:
         df = pd.read_csv(filepath)
         bounds = {col: (df[col].min(), df[col].max()) for col in FORMULATION_FEATURES}
@@ -53,9 +61,7 @@ def fit_enalos_domain(df):
     """Fits the Applicability Domain model on UNIQUE drugs only."""
     if df is None: return None, None, None
     
-    # Drop duplicate formulations to calculate the true chemical threshold
     X_train = df[API_FEATURES].dropna().drop_duplicates()
-    
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X_train)
     
@@ -69,9 +75,12 @@ def fit_enalos_domain(df):
 
 @st.cache_resource
 def load_models():
-    """Loads the Random Forest models."""
+    """Loads the Random Forest models using dynamic paths."""
     loaded = {}
     for name, path in MODEL_PATHS.items():
+        if not os.path.exists(path):
+            st.error(f"Model File Missing: {path}")
+            continue
         try:
             loaded[name] = joblib.load(path)
         except Exception as e:
@@ -81,29 +90,19 @@ def load_models():
 def get_smiles_from_name(compound_name):
     """Smart search: Tries PubChem first, then CIR fallback."""
     name = compound_name.strip()
-    
-    # 1. Try PubChem
     try:
         pc_url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{name}/property/CanonicalSMILES/JSON"
         r = requests.get(pc_url, timeout=5)
         if r.status_code == 200:
             data = r.json()
             if 'PropertyTable' in data and 'Properties' in data['PropertyTable']:
-                props = data['PropertyTable']['Properties'][0]
-                if 'CanonicalSMILES' in props:
-                    return props['CanonicalSMILES']
-    except:
-        pass 
-    
-    # 2. Try CIR (NCI)
+                return data['PropertyTable']['Properties'][0]['CanonicalSMILES']
+    except: pass 
     try:
         cir_url = f"https://cactus.nci.nih.gov/chemical/structure/{name}/smiles"
         r = requests.get(cir_url, timeout=5)
-        if r.status_code == 200:
-            return r.text.strip()
-    except:
-        pass
-        
+        if r.status_code == 200: return r.text.strip()
+    except: pass
     return None
 
 def calculate_rdkit_descriptors(smiles):
@@ -119,35 +118,56 @@ def calculate_rdkit_descriptors(smiles):
             'NumSaturatedRings': rdMolDescriptors.CalcNumSaturatedRings(mol),
             'NumAliphaticRings': rdMolDescriptors.CalcNumAliphaticRings(mol)
         }
-    except:
-        return None
+    except: return None
 
-# Initialize resources safely
+# Initialize resources
 df_raw, form_bounds = load_data_and_bounds(DATA_PATH)
 scaler, knn_model, ad_threshold = fit_enalos_domain(df_raw)
 models = load_models()
 
 # ==========================================
-# 3. USER INTERFACE
+# 3. SIDEBAR & INFO
+# ==========================================
+with st.sidebar:
+    st.image("https://img.icons8.com/fluency/96/test-tube.png", width=80)
+    st.title("Lab Navigation")
+    st.info("""
+    **How to use:**
+    1. Enter your drug name or SMILES.
+    2. Verify the structure passes the **Applicability Domain (AD)**.
+    3. Set your target Size, EE%, and Zeta.
+    4. Run Optimization to find recipes.
+    """)
+    st.divider()
+    st.caption("Developed for Chitosan-Alginate Research")
+
+# ==========================================
+# 4. MAIN USER INTERFACE
 # ==========================================
 st.title("🧪 CS-ALG SmartFormulator Lab")
-st.markdown("Inverse Design of Chitosan-Alginate Nanoparticles using Machine Learning.")
+st.write("An AI-powered virtual lab for inverse design of Chitosan-Alginate nanoparticles.")
 
-# Ensure session state variables exist
-if 'valid_api' not in st.session_state:
-    st.session_state['valid_api'] = None
-if 'current_smiles' not in st.session_state:
-    st.session_state['current_smiles'] = None
+# Training space expander
+with st.expander("ℹ️ View the 21 Drugs used to train this AI"):
+    st.markdown("""
+    Our models are specialized in the chemical space of these molecules:
+    * **Antibiotics/Antivirals:** Amoxicillin, Berberine, D-Cycloserine, Favipiravir, Gatifloxacin, Metronidazole, Ofloxacin, Rifampicin
+    * **Anti-inflammatories/Antioxidants:** Astaxanthin, Curcumin, Fucoxanthin, Meloxicam, Quercetin
+    * **Others:** 5-Fluorouracil, Diphenhydramine, Glipizide, Puerarin, Simvastatin
+    """)
+
+if 'valid_api' not in st.session_state: st.session_state['valid_api'] = None
+if 'current_smiles' not in st.session_state: st.session_state['current_smiles'] = None
 
 # --- STEP 1: API INPUT ---
 st.header("1️⃣ Define your Drug (API)")
 
-input_method = st.radio("How would you like to input your drug?", ["By Name", "By SMILES String"])
+input_method = st.radio("Input method:", ["By Name", "By SMILES String"], horizontal=True)
 
 if input_method == "By Name":
-    drug_input = st.text_input("Enter Drug Name (IUPAC or Common):", placeholder="e.g. Ciprofloxacin or Curcumin")
+    drug_input = st.text_input("Enter Drug Name:", placeholder="e.g. Ciprofloxacin")
 else:
-    drug_input = st.text_input("Enter exact SMILES String:", placeholder="e.g. C1CC1N2C=C(C(=O)C3=CC(=C(C=C32)N4CCNCC4)F)C(=O)O")
+    drug_input = st.text_input("Enter exact SMILES String:")
 
 if st.button("Verify Drug Structure & Check AD"):
     if not drug_input:
@@ -155,7 +175,7 @@ if st.button("Verify Drug Structure & Check AD"):
     else:
         smiles = None
         if input_method == "By Name":
-            with st.spinner("Searching PubChem & NCI Databases..."):
+            with st.spinner("Searching Databases..."):
                 smiles = get_smiles_from_name(drug_input)
         else:
             smiles = drug_input.strip()
@@ -164,24 +184,21 @@ if st.button("Verify Drug Structure & Check AD"):
             st.session_state['current_smiles'] = smiles
             desc = calculate_rdkit_descriptors(smiles)
             if desc:
-                # AD Check
                 new_scaled = scaler.transform(pd.DataFrame([desc])[API_FEATURES])
                 dist = knn_model.kneighbors(new_scaled)[0].mean()
                 
                 if dist <= ad_threshold:
                     st.success(f"✅ Structure Verified! SMILES: `{smiles}`")
-                    st.info(f"🟢 **Applicability Domain Pass:** Your drug is highly similar to the training space (Distance {dist:.2f} <= {ad_threshold:.2f}).")
+                    st.info(f"🟢 **AD Pass:** Similarity Distance {dist:.2f} (Limit: {ad_threshold:.2f})")
                     st.session_state['valid_api'] = desc
                 else:
-                    st.error(f"🚨 HARD STOP: Structure Verified (`{smiles}`), but it falls OUTSIDE the Applicability Domain.")
-                    st.warning(f"🔴 Your drug's distance to the training data is {dist:.2f} (Threshold: {ad_threshold:.2f}). Predictions would be unreliable.")
+                    st.error(f"🚨 OUTSIDE Applicability Domain (Distance: {dist:.2f})")
+                    st.warning("Predictions for this specific molecule might be unreliable.")
                     st.session_state['valid_api'] = None
             else:
-                st.error("Invalid SMILES string. RDKit could not process it.")
-                st.session_state['valid_api'] = None
+                st.error("RDKit could not process this structure.")
         else:
-            st.error("Drug not found in databases. Try checking the spelling or switch to 'By SMILES String' to enter it manually.")
-            st.session_state['valid_api'] = None
+            st.error("Drug not found. Please check spelling or enter SMILES.")
 
 # --- STEP 2: TARGETS & OPTIMIZATION ---
 if st.session_state['valid_api']:
@@ -193,85 +210,57 @@ if st.session_state['valid_api']:
     with c2: ee_range = st.slider("Target EE (%)", 0, 100, (80, 100))
     with c3: zeta_range = st.slider("Target Zeta (mV)", -60, 60, (20, 40))
 
-    # --- CROSSLINKER CONTROL ---
     st.markdown("### 🧪 Formulation Strategy")
     crosslinker_strategy = st.radio(
         "Select Crosslinking Strategy:",
-        [
-            "Only Calcium Chloride (Recommended)", 
-            "Only TPP (Recommended)", 
-            "Allow Both (Advanced / Use if EE% is too low)"
-        ],
+        ["Only Calcium Chloride", "Only TPP", "Allow Both"],
         horizontal=True
     )
 
     if st.button("🚀 Run Inverse Design Optimization", type="primary"):
-        with st.spinner("Generating 10,000 theoretical recipes and predicting outcomes..."):
-            
-            # 1. Create theoretical library
+        with st.spinner("Generating 10,000 theoretical recipes..."):
             n_samples = 10000
             synth_data = {}
             for col in FORMULATION_FEATURES:
                 f_min, f_max = form_bounds[col]
                 synth_data[col] = np.random.uniform(f_min, f_max, n_samples)
             
-            # 1.5. Apply Crosslinker Constraints
-            if "Only Calcium" in crosslinker_strategy:
-                synth_data['TPP'] = np.zeros(n_samples)
-            elif "Only TPP" in crosslinker_strategy:
-                synth_data['Calcium chloride'] = np.zeros(n_samples)
+            if "Calcium" in crosslinker_strategy: synth_data['TPP'] = np.zeros(n_samples)
+            elif "TPP" in crosslinker_strategy: synth_data['Calcium chloride'] = np.zeros(n_samples)
             
             df_synth = pd.DataFrame(synth_data)
-            
-            # 2. Add fixed drug descriptors
             for feat, val in st.session_state['valid_api'].items():
                 df_synth[feat] = val
             
-            # 3. Predict Targets using pre-trained models
             X_input = df_synth[MODEL_FEATURE_ORDER]
             df_synth['Pred_Size'] = models['Size'].predict(X_input)
             df_synth['Pred_EE'] = models['EE'].predict(X_input)
             df_synth['Pred_Zeta'] = models['Zeta'].predict(X_input)
             
-            # 4. Filter by Target Ranges
             hits = df_synth[
                 (df_synth['Pred_Size'] >= size_range[0]) & (df_synth['Pred_Size'] <= size_range[1]) &
                 (df_synth['Pred_EE'] >= ee_range[0]) & (df_synth['Pred_EE'] <= ee_range[1]) &
                 (df_synth['Pred_Zeta'] >= zeta_range[0]) & (df_synth['Pred_Zeta'] <= zeta_range[1])
             ].copy()
 
-        st.markdown("---")
         if hits.empty:
-            st.warning("⚠️ No recipes found for these specific targets. Try widening your slider ranges, changing the crosslinker strategy, or running the optimization again (it tests 10,000 random combinations each time!).")
+            st.warning("⚠️ No recipes found. Try widening your target ranges.")
         else:
             st.subheader(f"🏆 Top {min(10, len(hits))} Optimized Recipes Found")
-            st.info("💡 **Important Lab Note:** All percentages represent the **final concentration** in the total mixed volume. Please account for dilution when mixing your initial stock solutions.")
             
-            # Label the Surfactants logically
             def label_surfactant(row):
-                if row['Surfactant_MW'] < 5000: return "Tween 80"
-                return "Pluronic F-127"
+                return "Tween 80" if row['Surfactant_MW'] < 5000 else "Pluronic F-127"
             
             hits['Surfactant_Type'] = hits.apply(label_surfactant, axis=1)
-            
-            # Clean up the output table
             display_cols = [
                 'API concentration final(%)', 'Chitosan', 'Alginate', 'Calcium chloride', 'TPP', 
                 'Surfactant_Type', 'Surfactant  Concentratin (%)', 
                 'Pred_Size', 'Pred_EE', 'Pred_Zeta'
             ]
             
-            # Sort by highest Encapsulation Efficiency (EE) to show the "best" ones first
             best_hits = hits.sort_values(by='Pred_EE', ascending=False).head(10)
-            
             st.dataframe(best_hits[display_cols].style.format(precision=4), use_container_width=True)
             
-            # Allow user to download the CSV
             csv_data = best_hits[display_cols].to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="📥 Download Top Recipes as CSV",
-                data=csv_data,
-                file_name="Optimized_Formulations.csv",
-                mime="text/csv"
-            )
+            st.download_button("📥 Download Recipes", csv_data, "Optimized_Formulations.csv", "text/csv")
             st.balloons()
