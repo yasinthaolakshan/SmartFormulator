@@ -131,6 +131,18 @@ models = load_models()
 with st.sidebar:
     st.image("https://img.icons8.com/fluency/96/test-tube.png", width=80)
     st.title("Lab Navigation")
+    
+    # NEW: Model Accuracy Panel added here
+    with st.expander("📊 Model Accuracy & Reliability", expanded=True):
+        st.markdown("""
+        **Expected Lab Margins (MAE):**
+        * **Zeta Potential:** ± 3.5 mV *(R²: 0.947)*
+        * **Encapsulation (EE):** ± 5.9 % *(R²: 0.864)*
+        * **Particle Size:** ± 41 nm *(R²: 0.842)*
+        
+        *Based on Random Forest predictive modeling.*
+        """)
+        
     st.info("""
     **How to use:**
     1. Enter your drug name or SMILES.
@@ -252,14 +264,23 @@ if st.session_state['valid_api']:
                 return "Tween 80" if row['Surfactant_MW'] < 5000 else "Pluronic F-127"
             
             hits['Surfactant_Type'] = hits.apply(label_surfactant, axis=1)
+            
+            # Copy to avoid setting with copy warnings
+            best_hits = hits.sort_values(by='Pred_EE', ascending=False).head(10).copy()
+            
+            # NEW: Format predictions to include the ± MAE directly in the table
+            best_hits['Pred_Size (nm)'] = best_hits['Pred_Size'].apply(lambda x: f"{x:.0f} ± 41")
+            best_hits['Pred_EE (%)'] = best_hits['Pred_EE'].apply(lambda x: f"{x:.1f} ± 5.9")
+            best_hits['Pred_Zeta (mV)'] = best_hits['Pred_Zeta'].apply(lambda x: f"{x:.1f} ± 3.5")
+            
             display_cols = [
                 'API concentration final(%)', 'Chitosan', 'Alginate', 'Calcium chloride', 'TPP', 
                 'Surfactant_Type', 'Surfactant  Concentratin (%)', 
-                'Pred_Size', 'Pred_EE', 'Pred_Zeta'
+                'Pred_Size (nm)', 'Pred_EE (%)', 'Pred_Zeta (mV)'
             ]
             
-            best_hits = hits.sort_values(by='Pred_EE', ascending=False).head(10)
-            st.dataframe(best_hits[display_cols].style.format(precision=4), use_container_width=True)
+            # Show the newly formatted table without the pandas style wrapper so the strings render cleanly
+            st.dataframe(best_hits[display_cols], use_container_width=True)
             
             csv_data = best_hits[display_cols].to_csv(index=False).encode('utf-8')
             st.download_button("📥 Download Recipes", csv_data, "Optimized_Formulations.csv", "text/csv")
