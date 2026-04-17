@@ -16,9 +16,9 @@ st.set_page_config(page_title="CS-ALG SmartFormulator", layout="wide", page_icon
 # File Paths - Make sure the CSV name matches exactly what is in your folder
 DATA_PATH = "Cleaned CS-ALG DATA.xlsx - default_1.csv" 
 MODEL_PATHS = {
-    "Size": "/home/cu01/CS-ALG/python_models/rf_model_size_optimized.joblib",
-    "EE": "/home/cu01/CS-ALG/python_models/rf_model_EE%_optimized.joblib",
-    "Zeta": "/home/cu01/CS-ALG/python_models/rf_model_ZP_optimized.joblib"
+    "Size": "/home/cu01/CS-ALG/Virtual_Lab/models/rf_model_size_optimized.joblib",
+    "EE": "/home/cu01/CS-ALG/Virtual_Lab/models/rf_model_EE%_optimized.joblib",
+    "Zeta": "/home/cu01/CS-ALG/Virtual_Lab/models/rf_model_ZP_optimized.joblib"
 }
 
 # Features exactly as they appear in your dataset
