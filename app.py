@@ -14,6 +14,17 @@ from sklearn.neighbors import NearestNeighbors
 # ==========================================
 st.set_page_config(page_title="CS-ALG SmartFormulator", layout="wide", page_icon="🧪")
 
+# --- NEW CODE: HIDE STREAMLIT MENU & GITHUB LINK ---
+hide_streamlit_style = """
+<style>
+#MainMenu {visibility: hidden;}
+header {visibility: hidden;}
+footer {visibility: hidden;}
+</style>
+"""
+st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+# ---------------------------------------------------
+
 # This dynamically finds the folder where app.py is located
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
