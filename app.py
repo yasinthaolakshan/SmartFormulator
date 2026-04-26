@@ -14,7 +14,7 @@ from sklearn.neighbors import NearestNeighbors
 # ==========================================
 st.set_page_config(page_title="CS-ALG SmartFormulator", layout="wide", page_icon="🧪")
 
-# --- NEW CODE: HIDE STREAMLIT MENU & GITHUB LINK ---
+# --- HIDE STREAMLIT MENU & GITHUB LINK ---
 hide_streamlit_style = """
 <style>
 #MainMenu {visibility: hidden;}
@@ -23,7 +23,6 @@ footer {visibility: hidden;}
 </style>
 """
 st.markdown(hide_streamlit_style, unsafe_allow_html=True)
-# ---------------------------------------------------
 
 # This dynamically finds the folder where app.py is located
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -143,7 +142,6 @@ with st.sidebar:
     st.image("https://img.icons8.com/fluency/96/test-tube.png", width=80)
     st.title("Lab Navigation")
     
-    # NEW: Model Accuracy Panel added here
     with st.expander("📊 Model Accuracy & Reliability", expanded=True):
         st.markdown("""
         **Expected Lab Margins (MAE):**
@@ -161,6 +159,13 @@ with st.sidebar:
     3. Set your target Size, EE%, and Zeta.
     4. Run Optimization to find recipes.
     """)
+    
+    # --- NEW: PROFESSIONAL DISCLAIMER ---
+    st.warning("""
+    **Disclaimer:**
+    These results are predictive computational outputs based on machine learning models trained on historical data. They are intended to guide experimental design and narrow down formulation candidates. Actual laboratory results may vary due to experimental conditions, material purity, and human factors. We do not guarantee specific in-vitro or in-vivo performance.
+    """)
+    
     st.divider()
     st.caption("Developed for Chitosan-Alginate Research")
 
@@ -170,7 +175,6 @@ with st.sidebar:
 st.title("🧪 CS-ALG SmartFormulator Lab")
 st.write("An AI-powered virtual lab for inverse design of Chitosan-Alginate nanoparticles.")
 
-# Training space expander
 with st.expander("ℹ️ View the 21 Drugs used to train this AI"):
     st.markdown("""
     Our models are specialized in the chemical space of these molecules:
@@ -240,9 +244,19 @@ if st.session_state['valid_api']:
         horizontal=True
     )
 
+    st.markdown("### ⚙️ Advanced Settings")
+    # NEW: Random Seed Input and Explanation
+    user_seed = st.number_input("Random Seed (for reproducible results):", min_value=1, max_value=99999, value=42, step=1)
+    st.caption("💡 **Why a Random Seed?** Inverse design works by rapidly generating tens of thousands of random theoretical formulation recipes and evaluating them. The seed locks the starting point of this random generation. It does *not* alter the AI models, but it ensures that if you or a reviewer run the optimization again with the exact same targets and seed, you will get the exact same list of theoretical recipes.")
+
     if st.button("🚀 Run Inverse Design Optimization", type="primary"):
-        with st.spinner("Generating 10,000 theoretical recipes..."):
-            n_samples = 10000
+        # INCREASED TO 50,000 SAMPLES
+        with st.spinner("Generating and evaluating 50,000 theoretical recipes..."):
+            
+            # Lock the seed
+            np.random.seed(user_seed)
+            
+            n_samples = 50000
             synth_data = {}
             for col in FORMULATION_FEATURES:
                 f_min, f_max = form_bounds[col]
@@ -269,17 +283,17 @@ if st.session_state['valid_api']:
         if hits.empty:
             st.warning("⚠️ No recipes found. Try widening your target ranges.")
         else:
-            st.subheader(f"🏆 Top {min(10, len(hits))} Optimized Recipes Found")
+            # NEW: Professional Notification
+            st.toast("✅ Optimization Complete!", icon="✅")
+            st.success(f"🏆 Top {min(10, len(hits))} Optimized Recipes Found")
             
             def label_surfactant(row):
                 return "Tween 80" if row['Surfactant_MW'] < 5000 else "Pluronic F-127"
             
             hits['Surfactant_Type'] = hits.apply(label_surfactant, axis=1)
             
-            # Copy to avoid setting with copy warnings
             best_hits = hits.sort_values(by='Pred_EE', ascending=False).head(10).copy()
             
-            # NEW: Format predictions to include the ± MAE directly in the table
             best_hits['Pred_Size (nm)'] = best_hits['Pred_Size'].apply(lambda x: f"{x:.0f} ± 41")
             best_hits['Pred_EE (%)'] = best_hits['Pred_EE'].apply(lambda x: f"{x:.1f} ± 5.9")
             best_hits['Pred_Zeta (mV)'] = best_hits['Pred_Zeta'].apply(lambda x: f"{x:.1f} ± 3.5")
@@ -290,9 +304,24 @@ if st.session_state['valid_api']:
                 'Pred_Size (nm)', 'Pred_EE (%)', 'Pred_Zeta (mV)'
             ]
             
-            # Show the newly formatted table without the pandas style wrapper so the strings render cleanly
             st.dataframe(best_hits[display_cols], use_container_width=True)
             
-            csv_data = best_hits[display_cols].to_csv(index=False).encode('utf-8')
-            st.download_button("📥 Download Recipes", csv_data, "Optimized_Formulations.csv", "text/csv")
-            st.balloons()
+            # --- NEW: Enhanced CSV Export ---
+            export_df = best_hits[display_cols].copy()
+            
+            # Adding all the requested metadata as new columns in the CSV
+            export_df.insert(0, 'Target_Zeta', f"{zeta_range[0]} to {zeta_range[1]}")
+            export_df.insert(0, 'Target_EE', f"{ee_range[0]} to {ee_range[1]}")
+            export_df.insert(0, 'Target_Size', f"{size_range[0]} to {size_range[1]}")
+            export_df.insert(0, 'Random_Seed', user_seed)
+            export_df.insert(0, 'API_Input', drug_input)
+            
+            # Add MAE Disclaimer column to the CSV
+            export_df['Expected_Lab_Margins (MAE)'] = "Size: ±41nm | EE: ±5.9% | Zeta: ±3.5mV"
+            export_df['Disclaimer'] = "Computational predictions based on ML models. In-vitro results may vary."
+            
+            csv_data = export_df.to_csv(index=False).encode('utf-8')
+            
+            # Dynamic filename based on the drug and the seed
+            safe_drug_name = drug_input.replace(" ", "_")[:20] 
+            st.download_button("📥 Download Recipes (CSV)", csv_data, f"Recipes_{safe_drug_name}_Seed{user_seed}.csv", "text/csv")
